@@ -1,15 +1,15 @@
-//! CONFIG
+const uploadUrl = "";
+const uploadField = "";
 
-const uploadUrl = ""; //? default upload url
-const uploadField = ""; //? default upload field
-
-//! CONFIG
+const Delay = (typeof window.Delay === 'function') ? window.Delay : (ms) => new Promise(r => setTimeout(r, ms));
 
 import { CfxTexture, LinearFilter, Mesh, NearestFilter, OrthographicCamera, PlaneBufferGeometry, RGBAFormat, Scene, ShaderMaterial, UnsignedByteType, WebGLRenderTarget, WebGLRenderer } from "/module/Three.js";
 
 var isAnimated = false;
 var MainRender;
 var scId = 0;
+var pixelBuffer = null;
+var imageData = null;
 
 // from https://stackoverflow.com/a/12300351
 function dataURItoBlob(dataURI) {
@@ -69,7 +69,7 @@ class GameRender {
         quad.position.z = -100;
         sceneRTT.add(quad);
 
-        const renderer = new WebGLRenderer();
+        const renderer = new WebGLRenderer({ powerPreference: 'high-performance', antialias: false, preserveDrawingBuffer: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.autoClear = false;
 
@@ -94,12 +94,7 @@ class GameRender {
 
     resize(screenshot) {
         const cameraRTT = new OrthographicCamera(window.innerWidth / -2, window.innerWidth / 2, window.innerHeight / 2, window.innerHeight / -2, -10000, 10000);
-        if (screenshot === true) {
-            cameraRTT.setViewOffset(window.innerWidth, window.innerHeight, 0, 0, window.innerWidth, window.innerHeight);
-        } else {
-            const width = Math.floor(window.innerHeight * 10 / 23);
-            cameraRTT.setViewOffset(window.innerWidth, window.innerHeight, window.innerWidth / 3.8, 0, width, window.innerHeight);
-        }
+        cameraRTT.setViewOffset(window.innerWidth, window.innerHeight, 0, 0, window.innerWidth, window.innerHeight);
 
         this.cameraRTT = cameraRTT;
 
@@ -119,21 +114,26 @@ class GameRender {
 
     animate() {
         requestAnimationFrame(this.animate);
-        if (isAnimated) {
-            this.renderer.clear();
-            this.renderer.render(this.sceneRTT, this.cameraRTT, this.rtTexture, true);
-            const read = new Uint8Array(window.innerWidth * window.innerHeight * 4);
-            this.renderer.readRenderTargetPixels(this.rtTexture, 0, 0, window.innerWidth, window.innerHeight, read);
-
-            this.canvas.width = window.innerWidth;
-            this.canvas.height = window.innerHeight;
-
-            const d = new Uint8ClampedArray(read.buffer);
-
-            const cxt = this.canvas.getContext('2d');
-            const imageData = new ImageData(d, window.innerWidth, window.innerHeight);
-            cxt.putImageData(imageData, 0, 0);
+        if (!isAnimated || !this.canvas) return;
+        this.renderer.clear();
+        this.renderer.render(this.sceneRTT, this.cameraRTT, this.rtTexture, true);
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const size = w * h * 4;
+        if (!pixelBuffer || pixelBuffer.length !== size) {
+            pixelBuffer = new Uint8Array(size);
         }
+        this.renderer.readRenderTargetPixels(this.rtTexture, 0, 0, w, h, pixelBuffer);
+        if (!imageData || imageData.width !== w || imageData.height !== h) {
+            imageData = new ImageData(w, h);
+        }
+        imageData.data.set(pixelBuffer);
+        const cxt = this.canvas.getContext('2d');
+        if (this.canvas.width !== w || this.canvas.height !== h) {
+            this.canvas.width = w;
+            this.canvas.height = h;
+        }
+        cxt.putImageData(imageData, 0, 0);
     }
 
     createTempCanvas() {
@@ -184,8 +184,8 @@ class GameRender {
     stop() {
         isAnimated = false;
         if (this.canvas) {
-            if (this.canvas.style.display != "none") {
-                this.canvas.style.display = "none";
+            if (this.canvas.style && this.canvas.style.display !== 'none') {
+                this.canvas.style.display = 'none';
             }
         }
         this.resize(true);
@@ -195,4 +195,9 @@ class GameRender {
 setTimeout(() => {
     MainRender = new GameRender();
     window.MainRender = MainRender;
-}, 1000);
+    window.cfxrender = {
+        renderToTarget: (element) => MainRender.renderToTarget(element),
+        stop: () => MainRender.stop(),
+        requestScreenshot: (url, field) => MainRender.requestScreenshot(url, field)
+    };
+}, 500);
